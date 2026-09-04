@@ -19,6 +19,25 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # A workflow file that does not parse fails OUTSIDE every required
+      # check: GitHub records a startup failure against unrelated pushes and
+      # the pull request that introduced it stays green. One did, and it took
+      # a missing release to notice. Parse them in the check that gates merges.
+      - name: Workflow files parse
+        run: |
+          ruby -ryaml -e '
+            bad = Dir[".github/workflows/*.yml"].reject do |f|
+              begin
+                YAML.parse(File.read(f))
+                true
+              rescue Psych::SyntaxError => e
+                warn "#{f}: #{e.message}"
+                false
+              end
+            end
+            abort("#{bad.size} workflow file(s) do not parse") unless bad.empty?
+            puts "workflows parse"
+          '
       - name: Typecheck
         run: npm run typecheck
       - name: Build
