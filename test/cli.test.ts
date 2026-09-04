@@ -78,10 +78,15 @@ test("every command the CLI implements is one the usage text lists", () => {
   );
 
   const body = SOURCE.slice(SOURCE.indexOf("async function main"));
-  const implemented = [...body.matchAll(/^ {6}case "([a-z-]+)"/gm)].map((m) => m[1]!);
-  // `launch` is handled before the switch, since it is the one command that
-  // runs without an existing connection.
-  implemented.push("launch");
+  // Two shapes, both read out of the source rather than listed here. Most
+  // commands are a `case` in the switch; the few that need no connection
+  // (`launch`, `build-native`) are handled before it as an equality check.
+  // Naming them here instead would be a list to keep in step with the code,
+  // and the whole point of this test is that no such list exists.
+  const implemented = [
+    ...[...body.matchAll(/^ {6}case "([a-z-]+)"/gm)].map((m) => m[1]!),
+    ...[...body.matchAll(/^ {2}if \(command === "([a-z-]+)"\)/gm)].map((m) => m[1]!),
+  ];
 
   expect(implemented.filter((command) => !documented.has(command))).toEqual([]);
   expect(documented.size).toBe(implemented.length);

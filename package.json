@@ -34,6 +34,7 @@
     "dist",
     "native/src",
     "native/Makefile",
+    "scripts/postinstall.mjs",
     "README.md",
     "SECURITY.md",
     "LICENSE"
@@ -43,6 +44,7 @@
     "build:ts": "tsc -p tsconfig.build.json",
     "build": "npm run build:native && npm run build:ts",
     "prepare": "npm run build:ts",
+    "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test test",
     "clean": "rm -rf dist native/build",

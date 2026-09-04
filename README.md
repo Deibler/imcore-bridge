@@ -41,21 +41,39 @@ inside that sandbox `bind()` succeeds but `listen()` fails with `EPERM`.
 
 ## Quick start
 
-The package is not on npm yet, so install from a checkout. Building the
-dylib needs the Xcode Command Line Tools and a Mac with SIP off (see
-Requirements); the TypeScript client builds anywhere.
+```bash
+npm install imcore-bridge
+```
+
+The dylib is compiled at install time rather than shipped. A prebuilt binary
+that gets injected into Messages.app is not something to accept from a
+registry sight unseen, and it would have to be architecture matched and signed
+anyway. The sources and the Makefile are in the package, and `postinstall`
+runs `make` where it landed.
+
+That build is best effort and never fails the install, because it does not
+have to succeed for the package to be useful: reading the message store and
+talking to a bridge that is already running need no dylib. If it was skipped,
+either because the Xcode Command Line Tools were missing or because you
+installed with scripts disabled, build it whenever you like:
+
+```bash
+npx imcore-bridge build-native
+```
+
+Sending before that has happened fails with the path it looked in and the
+command that fixes it, rather than with a missing file.
+
+To work on the bridge itself, or to run it from a checkout:
 
 ```bash
 git clone https://github.com/Deibler/imcore-bridge.git
 cd imcore-bridge
-npm ci
-npm run build               # make -C native (builds and ad-hoc signs the dylib), then tsc
+npm ci                      # postinstall builds the dylib
+npm run build               # make -C native, then tsc
 ```
 
-To use it from another project on the same machine, add
-`"imcore-bridge": "file:../imcore-bridge"` to that project's dependencies, or
-`npm link` it. A rebuilt dylib takes effect the next time Messages.app
-launches. `launch()` quits and relaunches a running Messages.app so the dylib loads; pass `{ restart: false }` to attach to one that already has it.
+A rebuilt dylib takes effect the next time Messages.app launches. `launch()` quits and relaunches a running Messages.app so the dylib loads; pass `{ restart: false }` to attach to one that already has it.
 
 ```ts
 import { launch, Effects } from "imcore-bridge";

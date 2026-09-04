@@ -51,6 +51,20 @@ jobs:
           ./node_modules/.bin/imcore-bridge --version
           ./node_modules/.bin/imcore-bridge --help > /dev/null
 
+          # The dylib is compiled at install time rather than shipped, so a
+          # consumer install is only complete if postinstall actually ran and
+          # produced it. Without this the package installs cleanly and cannot
+          # send, which is the failure the build-native command exists for.
+          dylib=node_modules/imcore-bridge/native/build/imcore-bridge.dylib
+          test -f "$dylib" || { echo "postinstall did not build the dylib"; exit 1; }
+
+          # And the recovery path: a machine that installed with scripts
+          # disabled, or gained the command line tools afterwards, has to be
+          # able to build it later. Remove it and put it back by command.
+          rm "$dylib"
+          ./node_modules/.bin/imcore-bridge build-native
+          test -f "$dylib" || { echo "build-native did not produce the dylib"; exit 1; }
+
   # Compiling the dylib and probing selectors needs no injection, so a plain
   # runner still catches a macOS update that removes an API we depend on.
   native:

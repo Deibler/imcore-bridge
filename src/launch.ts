@@ -76,7 +76,8 @@ function resolveDylib(dylibPath?: string): string {
   const resolved = dylibPath ?? defaultDylibPath(packageRoot());
   if (!fs.existsSync(resolved)) {
     throw new BridgeUnavailableError(
-      `dylib not found at ${resolved} — run \`npm run build:native\` first`,
+      `dylib not found at ${resolved}. Build it with \`npx imcore-bridge build-native\` ` +
+        "(it needs the Xcode command line tools; `xcode-select --install`).",
     );
   }
   return resolved;
