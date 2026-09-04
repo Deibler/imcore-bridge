@@ -1,0 +1,66 @@
+{
+  "name": "imcore-bridge",
+  "version": "0.1.0",
+  "description": "Automate the macOS Messages app: typing indicators, rich sends, tapbacks, edits, group management, and live inbound message events.",
+  "homepage": "https://github.com/Deibler/imcore-bridge#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Deibler/imcore-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Deibler/imcore-bridge/issues"
+  },
+  "author": "Hunter Deibler",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "imcore-bridge": "./dist/bin/imcore-bridge.js"
+  },
+  "files": [
+    "dist",
+    "native/src",
+    "native/Makefile",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:native": "make -C native",
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build": "npm run build:native && npm run build:ts",
+    "prepare": "npm run build:ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test",
+    "clean": "rm -rf dist native/build",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "npm run build && changeset publish"
+  },
+  "keywords": [
+    "macos",
+    "messages",
+    "imessage",
+    "imcore",
+    "automation"
+  ],
+  "devDependencies": {
+    "@changesets/cli": "^2.27.9",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

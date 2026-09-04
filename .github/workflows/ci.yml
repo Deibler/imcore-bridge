@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # The client is tested against a stub socket, so protocol handling, capability
+  # gating and error mapping are covered on a stock runner with no injection.
+  client:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build:ts
+      - name: Test
+        run: bun test test
+
+      # The published entry points are not the same thing as a successful
+      # build. `main`, `types` and `bin` are paths into dist that nothing else
+      # here exercises, so a change in the output layout leaves every other
+      # check green and still ships a package that cannot be imported. This
+      # installs the tarball the way a consumer would, imports it by name, and
+      # runs the installed binary — `bin` resolves separately from `main`, and
+      # `--version` is the one command that answers without a bridge.
+      - name: Verify the packed package imports and runs by name
+        run: |
+          npm pack
+          smoke=$(mktemp -d)
+          cp imcore-bridge-*.tgz "$smoke/"
+          cd "$smoke"
+          npm init -y > /dev/null
+          npm install ./imcore-bridge-*.tgz
+          node --input-type=module -e '
+            import { ImcoreBridge } from "imcore-bridge";
+            if (typeof ImcoreBridge?.connect !== "function") {
+              throw new Error("package entry point does not expose ImcoreBridge");
+            }
+            console.log("entry points resolve");
+          '
+          ./node_modules/.bin/imcore-bridge --version
+          ./node_modules/.bin/imcore-bridge --help > /dev/null
+
+  # Compiling the dylib and probing selectors needs no injection, so a plain
+  # runner still catches a macOS update that removes an API we depend on.
+  native:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dylib
+        run: make -C native
+      - name: Verify it loads and is the right architecture
+        run: |
+          file native/build/imcore-bridge.dylib
+          lipo -archs native/build/imcore-bridge.dylib | grep -q arm64e
+          codesign -dv native/build/imcore-bridge.dylib 2>&1 | grep -q adhoc

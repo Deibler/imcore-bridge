@@ -1,0 +1,13 @@
+node_modules/
+dist/
+native/build/
+*.dylib
+*.log
+.DS_Store
+
+# Screenshots dropped in for debugging — never part of the library.
+Screenshot*.png
+/*.png
+
+# npm pack output, produced by the packaging check.
+*.tgz

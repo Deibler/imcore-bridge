@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  // rootDir is the published layout: with `src` as the root, src/index.ts
+  // becomes dist/index.js and src/bin/ becomes dist/bin/, which is what
+  // package.json's main, types and bin already point at. Rooting at the repo
+  // instead pushes everything down a level into dist/src/, and nothing catches
+  // it until someone imports the package by name.
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["test", "examples"]
+}
