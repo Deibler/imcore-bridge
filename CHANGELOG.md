@@ -1,5 +1,250 @@
 # imcore-bridge
 
+## 0.2.0
+
+### Minor Changes
+
+- 976b965: Stop guessing whether an operation happened: ask first, retry safely, and check
+  afterwards.
+  
+  **Group membership changes are asked about before they are made.** Removing
+  someone from a group of three would leave two, and IMCore declines — by doing
+  nothing and saying nothing, which reads as a change that took effect. The docs
+  here recorded that as a known partial and left callers to detect it by reading
+  the group back. IMCore knows the answer in advance: `canAddParticipants:` and
+  `canRemoveParticipants:` are what the app asks before it enables the menu item.
+  Both membership calls now ask, and refuse with a reason instead of reporting a
+  success that did nothing.
+  
+  The check is also exposed on its own as `group.canAdd` / `group.canRemove`,
+  because it is read-only and therefore the one thing in this area that can be
+  verified without a real conversation changing to tell you. Which is how it was
+  verified: a three-person group answers no to a removal, a nine-person group
+  answers yes, and a 1:1 answers no to an addition. Twenty-eight of the sixty-two
+  groups on the machine this was written on have three people in them, so the
+  silent case was the common one.
+  
+  **A send can now be repeated safely, and its fate looked up afterwards.** A send
+  that reaches Messages and then loses its reply — a timeout, a dropped socket, a
+  client that died in between — left the caller unable to tell whether it went
+  out. Retrying sent it twice; not retrying dropped it; neither was fixable
+  afterwards, because nothing in the message store tied an attempt to the caller's
+  intent. `send` now takes an `idempotencyKey` of the caller's choosing: the same
+  key inside the window returns the original GUID marked `duplicate` and sends
+  nothing. Verified by sending the same key twice and finding one bubble in the
+  store. The record lives in the injected process and is dropped when Messages
+  restarts, deliberately — it covers a retry cycle, not a decision to send the
+  same thing again hours later.
+  
+  `sendStatus` answers the other half, by GUID: `unknown`, `pending`, `sent`,
+  `delivered`, `read` or `failed`. `unknown` is a real answer rather than a
+  failure, since a message not yet written to the store and one that was never
+  sent are indistinguishable from here — so it is reported as what it is instead
+  of being guessed between.
+  
+  **A sticker can be stuck onto an existing bubble**, the way peel-and-stick does,
+  rather than only sent on its own. A stuck sticker turns out not to be a message
+  with a picture in it: it is an _associated_ message, addressed the way a tapback
+  is — `p:<part>/<guid>` plus the range it covers — carrying type 1000 and a
+  sticker transfer. That shape is in no header; it came from reading the nine
+  already in this machine's store. The one factory that takes both a transfer list
+  and the association triple is the long initialiser, since every convenience
+  method drops one or the other — the same trap the ordinary send path documents.
+  Verified by sending one and reading it back with the right type, target and
+  sticker flag.
+  
+  **Deleting a conversation** is now distinct from emptying one. `deleteHistory`
+  leaves the conversation in the list with nothing in it, which is not what a
+  person means by deleting a chat; `deleteChat` removes the thread itself via
+  `-[IMChat remove]`. Both are local — the other party keeps their copy either
+  way. Shipped unverified: there is no throwaway conversation on this machine, and
+  unlike emptying, this one takes the thread.
+  
+  **Sharing your Name & Photo** is possible where before only reading other
+  people's cards was. It is deliberately an explicit call and never a side effect
+  of anything else, because it discloses the name and picture of whoever is
+  running this. Shipped unverified for the same reason: testing it means sending a
+  real person your profile.
+- 976b965: Keep the bridge up without being asked: `supervise()`.
+  
+  `launch()` is one shot. It owns a socket, injects, and hands back a connected
+  bridge — which is right for a script and not enough for a process that has to
+  stay reachable for days. The client already survives Messages restarting on its
+  own, because the socket outlives the app and the injected side re-dials with
+  backoff. Two things it could not do alone are what `supervise()` adds.
+  
+  **Messages is brought back when nothing else will.** It crashed, the user quit
+  it, or it is running without the dylib and so will never dial. Relaunches are
+  serialised and backed off, so an app that refuses to start is retried at a
+  widening interval instead of in a loop, and concurrent callers collapse into one
+  restart rather than several.
+  
+  **A bridge that stops answering is noticed.** This is the failure that prompted
+  it: the socket stays open and `isConnected` keeps reporting true while the
+  injected side has stopped serving RPCs. Every call then burns its full timeout
+  before failing, and because the connection never dropped there is nothing to
+  react to. Asking periodically, with a deadline much shorter than the one real
+  sends need, is what separates a quiet bridge from a wedged one — and relaunching
+  Messages is the only thing that clears it. `relaunch()` is public for the same
+  reason: a send that just timed out is better evidence than the next probe, and
+  the host should not have to wait for one.
+  
+  An already-injected Messages is adopted rather than restarted, so a host that
+  restarts often stops closing the user's messaging client every time it comes up.
+  `stop()` leaves Messages running — the host exiting is not a reason to quit it.
+  
+  The bridge handed back is stable across relaunches, so long-lived consumers like
+  `events()` keep working and never resubscribe.
+- 66f3dec: Make the package installable from npm. The dylib is now compiled at install
+  time by a best effort `postinstall` that never fails the install, and a new
+  `imcore-bridge build-native` command builds it later for anyone who installed
+  with scripts disabled or without the Xcode Command Line Tools. The missing
+  dylib error now names a command a consumer can actually run.
+- 976b965: Catch up on what was missed, choose the service, and stop losing conversations
+  to a single-answer lookup.
+  
+  **Reading forwards from a cursor.** `storeHistory` paged backwards only, and
+  required a chat. That answers "further into this conversation's past" and
+  cannot answer "what happened while I was not running" — you would start at the
+  newest message and walk towards the cursor, not knowing when to stop, across
+  every conversation separately, because a caller that was away does not know
+  which ones have news. It now takes `sinceRowID` and reads forwards, with `chat`
+  optional: leaving it out spans every conversation in one scan and stamps each
+  message with the `chatGuid` it came from. Passing both cursors is refused
+  rather than resolved, since a window bounded at both ends has no single
+  position to continue from. Asked with no cursor at all it answers with the
+  newest page, whose `nextSinceRowID` is where to start — so a first run begins
+  at now instead of replaying years of archive. Two details that only matter in
+  use: the cursors are taken from the page as read rather than from what came
+  back, so a page that folded entirely into reactions still advances; and a poll
+  that finds nothing hands back the cursor it was given rather than zero, so a
+  caller storing the reply unconditionally does not reset itself.
+  
+  **A rowid on live events.** A message event carried no store rowid, so a
+  consumer could follow the stream but not record where it got to — which made
+  the catch-up above impossible to start from. IMCore calls it `messageID` and it
+  is the store's ROWID: verified equal on a few hundred messages across a dozen conversations,
+  with none missing it. It is absent until Messages has written the message,
+  which for one just received can be a moment after the event fires. Absent is
+  the safe direction — a consumer that cannot advance its cursor sees that
+  message twice after a restart, where a guessed rowid would move the cursor past
+  messages that were never delivered.
+  
+  **Choosing which service carries a message.** `send` takes `service`, naming
+  iMessage or SMS. It routes that one message over the matching account and
+  deliberately leaves the conversation's own alone, since rewriting it would
+  change where every later message goes, including ones sent from the app by
+  hand. The result now names the service that carried it either way, which is the
+  only way to learn whether something went out as an iMessage or as a text. An
+  unknown name is rejected rather than falling through to the conversation's own
+  service and reading as though it had been honoured, and a Mac with no text
+  relay is refused rather than quietly sending an iMessage instead — both
+  verified, and neither sends anything. Forcing SMS is unverified end to end:
+  this machine reports `smsRelayCapable: false`, so there is no SMS account here
+  to send on.
+  
+  **Every conversation an identifier maps to.** `resolveChat` answers with one
+  chat, which is fine for addressing a send and wrong for reading: the same
+  person can have an iMessage thread and an SMS thread, and a reply sent into the
+  quiet one goes somewhere nobody is looking. `resolveChats` returns the set,
+  most recently active first. Asking for a plain phone number on the machine this
+  was written on turned up two threads for one person — the ordinary one, and a
+  second whose GUID embedded the contact's name, last used four months earlier.
+  
+  **Every conversation a handle appears in.** `chatsWith` answers with all of
+  them, groups included. Empty means the address has never been spoken to, which
+  is what makes it usable as a check before sending somewhere new rather than
+  only as a way to find shared groups — and it is an empty list rather than an
+  error, so a caller does not have to tell "no such person" apart from "the
+  bridge is down". Numbers match on their national digits, because the same
+  person is written `+15551234567` in one chat and `(555) 123-4567` in another
+  depending on how the conversation started; a plain string comparison answers
+  "never heard of them" for someone you are mid-conversation with. Fewer than ten
+  digits is not matched at all, since a short match would put unrelated people in
+  the same conversation.
+  
+  **A typing indicator no longer outlives the client that set it.**
+  `setLocalUserIsTyping:` is a flag with no expiry: nothing clears it but an
+  explicit stop. A client that died mid-turn left the dots showing in a real
+  conversation with nobody to turn them off, and a person on the other end
+  waiting for a message that was never coming. The bridge now tracks what it
+  switched on and clears it when the host disconnects — a clean close, a crash
+  and a kill all reach the injected side the same way, as EOF on the socket. A
+  turn that stops the indicator itself leaves nothing to clear.
+  
+  `hasMore` was reaching callers as `1` rather than `true`, from a C comparison
+  boxed as a number. The `send` documentation still described attachments going
+  out through Messages' scripting interface as separate messages, which stopped
+  being true when they moved to the injected path — they travel with the text as
+  one message, to any conversation, group chats included.
+
+### Patch Changes
+
+- 976b965: Refuse a socket another host is still serving, instead of taking it.
+  
+  `listen()` unlinked the socket path unconditionally before binding, on the
+  assumption that anything there was a leftover. When another host was still
+  serving it, that was silent theft: the new host bound a fresh inode, the old one
+  kept a socket bound to an inode nothing could reach any more, and the injected
+  side dialled whichever had bound last.
+  
+  The result is a bridge that cannot be diagnosed from either end. In the case that
+  prompted this, three throwaway scripts from a debugging session three days
+  earlier were still holding the path — owning the socket keeps the process alive,
+  so they never exited. The daemon bound after them, was never dialled, and spent
+  half an hour relaunching Messages and reporting that SIP must be misconfigured.
+  SIP was fine.
+  
+  `listen()` now probes the path first and refuses with a message naming `lsof`
+  when something answers. A file nobody is serving is still reclaimed, so an
+  unclean exit does not need manual cleanup. The failure that used to take an
+  afternoon now happens at startup and says what to look at.
+  
+  The launch and relaunch timeout messages also stop blaming SIP for everything.
+  They name both causes — a dylib that did not load, and a socket held elsewhere —
+  because only one of them was ever printed and it was usually the wrong one.
+- 976b965: Remove account forcing, and refuse to act on a chat that is not the one addressed.
+  
+  `sendMessage:onAccount:` — the Send as Text Message mechanism, reached by
+  naming a `service` the chat was not bound to — re-registers the chat against
+  our own account inside imagent. From then on the registry object's recipient
+  reads as our own address and every send into it lands in the note-to-self
+  thread while reporting success. Every observed poisoning traces back to this
+  call, so it is gone: a message goes however its conversation already sends,
+  and naming the other service is refused with `service_mismatch` instead of
+  taking the poisoned route.
+  
+  Beneath that, resolution now carries an invariant. Every write op asserts the
+  chat it resolved really is the conversation the spec addressed — identifier,
+  sole participant, or recipient must name the addressed handle, across e:/p:
+  type-prefix spellings — and refuses with `chat_mismatch` when the registry's
+  object is wrong, including the poison shape where the object has been fully
+  relabelled with our own identity (previously invisible to `chat_poisoned`,
+  which reads a self-identified chat as legitimate note-to-self). The typing
+  indicator honors the same invariant instead of lighting up the wrong thread.
+  
+  Two propagation paths are closed with it: `IMBLookupHandle` no longer returns
+  a poisoned chat's sole participant for an address it does not match (which
+  handed our own IMHandle to `createChat`/`whois` and spread the damage), and
+  the last-resort registry scan only matches 1:1 conversations by participant,
+  so a DM spec can never resolve into a group. Address matching itself now
+  strips IMCore's e:/p: prefixes, so both spellings of one address compare
+  equal everywhere.
+- 976b965: Only force an account when the conversation is known to be somewhere else.
+  
+  Naming a service routes one message over that service's account, which is what
+  the composer does for Send as Text Message. The check for whether that was
+  needed asked whether the chat was already on the named service, and a chat whose
+  account is not bound yet — freshly resolved, or Messages only just relaunched —
+  answers with no service at all. That read as "on a different service", so an
+  ordinary reply went out with `sendMessage:onAccount:` instead of into the chat,
+  and arrived at the sender's own address rather than the recipient's. It looked
+  like a successful send from every angle except the recipient's.
+  
+  Unknown now counts as "not somewhere else". Forcing an account is the
+  destructive branch, so it is taken only on positive evidence that the
+  conversation is on another service.
+
 ## 0.1.0
 
 ### Minor Changes

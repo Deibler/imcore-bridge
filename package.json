@@ -1,6 +1,6 @@
 {
   "name": "imcore-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Automate the macOS Messages app: typing indicators, rich sends, tapbacks, edits, group management, and live inbound message events.",
   "homepage": "https://github.com/Deibler/imcore-bridge#readme",
   "repository": {
