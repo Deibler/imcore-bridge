@@ -64,14 +64,25 @@ jobs:
       - name: Attach the tarball to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.tarball }}" \
+          # Notes go through a file. Writing them inline needs a multi-line
+          # string inside a YAML block scalar, and a single line that starts at
+          # column 0 silently ends the scalar and makes the whole workflow
+          # unparseable, which GitHub reports only as a startup failure on
+          # unrelated pushes.
+          {
+            echo "Install without a registry account:"
+            echo
+            echo '```bash'
+            echo "bun add https://github.com/$REPO/releases/download/$GITHUB_REF_NAME/$TARBALL"
+            echo '```'
+            echo
+            echo "See CHANGELOG.md for what changed."
+          } > release-notes.md
+
+          gh release create "$GITHUB_REF_NAME" "$TARBALL" \
             --title "$GITHUB_REF_NAME" \
-            --notes "Install without a registry account:
-
-\`\`\`bash
-bun add https://github.com/${{ github.repository }}/releases/download/$GITHUB_REF_NAME/${{ steps.pack.outputs.tarball }}
-\`\`\`
-
-See the changelog for what changed." \
-            || gh release upload "$GITHUB_REF_NAME" "${{ steps.pack.outputs.tarball }}" --clobber
+            --notes-file release-notes.md \
+            || gh release upload "$GITHUB_REF_NAME" "$TARBALL" --clobber
