@@ -1,5 +1,20 @@
 # imcore-bridge
 
+## 0.2.3
+
+### Patch Changes
+
+- 9fda653: Read the released version from the commit rather than the working tree when
+  attaching a release asset. The changesets step versions in place while building
+  its pull request, so the attach step asked for a tag that did not exist yet and
+  reported success while attaching nothing. It now also verifies the asset is on
+  the release afterwards.
+- a0de2e7: Attach the release tarball from the release job instead of a tag-triggered
+  workflow. A tag pushed with the default token does not start a workflow run, so
+  the tag trigger never fired and v0.2.2 was tagged with nothing installable
+  behind it. The attach step is idempotent and repairs a release that is missing
+  its asset.
+
 ## 0.2.2
 
 ### Patch Changes
