@@ -1,0 +1,44 @@
+name: Release
+
+# Changesets flow. Every merged change carries a .changeset entry; this
+# workflow keeps a "Version packages" pull request open that bumps
+# package.json and CHANGELOG.md. Merging that pull request tags the release
+# and publishes to npm.
+#
+# Publishing needs an NPM_TOKEN secret with publish rights on the package. If
+# it is absent the version pull request still works and only the publish step
+# is skipped, so the repository is useful before anyone sets it up.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency: release-${{ github.ref }}
+
+jobs:
+  version:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Version pull request, or tag and publish the release
+        uses: changesets/action@v2
+        with:
+          version-script: npm run version
+          publish-script: npm run release
+          commit-message: "Version packages"
+          pr-title: "Version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

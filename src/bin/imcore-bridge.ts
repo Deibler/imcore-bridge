@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Thin CLI over the library, for shell scripts and non-TypeScript callers.
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { join } from "node:path";
 
 import { ImcoreBridge } from "../client.js";
 import { launch } from "../launch.js";
-import { defaultSocketPath, packageRoot } from "../paths.js";
+import { defaultDylibPath, defaultSocketPath, packageRoot } from "../paths.js";
 import { ImcoreBridgeError } from "../errors.js";
 import type { GroupEvent, SearchKind, StoredMessage, TapbackKind } from "../types.js";
 
@@ -13,6 +14,7 @@ const USAGE = `imcore-bridge — automate the macOS Messages app
 
 Usage:
   imcore-bridge launch                       relaunch Messages with the bridge injected
+  imcore-bridge build-native                 compile the injected dylib (needs Xcode CLT)
   imcore-bridge status                       show the capability matrix
   imcore-bridge chats [--limit N]            list conversations
   imcore-bridge history --chat C [--limit N] recent messages, as JSON
@@ -93,6 +95,31 @@ agreed to receive test traffic.
 const COMMANDS = new Set(
   [...USAGE.matchAll(/^ {2}imcore-bridge ([a-z-]+)/gm)].map((match) => match[1]!),
 );
+
+/**
+ * Compile the dylib in place, wherever the package was installed.
+ *
+ * A consumer who installed from the registry cannot run this package's npm
+ * scripts, so the build has to be reachable as a command. `postinstall`
+ * already tries it; this is what to run when that was skipped, which is the
+ * common case on a machine that gained the command line tools afterwards.
+ */
+function buildNative(): void {
+  const root = packageRoot();
+  const result = spawnSync("make", ["-C", "native"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+    throw new ImcoreBridgeError(
+      "make is not on PATH. Install the command line tools with `xcode-select --install`.",
+    );
+  }
+  if (result.status !== 0) {
+    throw new ImcoreBridgeError(`the native build failed in ${root}`);
+  }
+  console.log(`built ${defaultDylibPath(root)}`);
+}
 
 /** The version npm installed, for `--version`. */
 function version(): string {
@@ -236,6 +263,11 @@ async function main(): Promise<void> {
     console.error(`unknown command '${command}'\n`);
     process.stdout.write(USAGE);
     process.exitCode = 2;
+    return;
+  }
+
+  if (command === "build-native") {
+    buildNative();
     return;
   }
 
