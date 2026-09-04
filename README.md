@@ -41,9 +41,31 @@ inside that sandbox `bind()` succeeds but `listen()` fails with `EPERM`.
 
 ## Quick start
 
+The package is distributed as a GitHub Release asset rather than through npm,
+so installing needs no registry account and no token. Point your package
+manager at the tarball for the version you want:
+
 ```bash
-npm install imcore-bridge
+bun add https://github.com/Deibler/imcore-bridge/releases/download/v0.2.0/imcore-bridge-0.2.0.tgz
 ```
+
+```bash
+npm install https://github.com/Deibler/imcore-bridge/releases/download/v0.2.0/imcore-bridge-0.2.0.tgz
+```
+
+The asset is exactly what `npm pack` produces, including the compiled client,
+so nothing has to be built for the TypeScript half to work. Releases are listed
+at [github.com/Deibler/imcore-bridge/releases](https://github.com/Deibler/imcore-bridge/releases).
+
+Under bun, add the package to `trustedDependencies` if you want the dylib
+built during install, since bun blocks install scripts by default:
+
+```json
+{ "trustedDependencies": ["imcore-bridge"] }
+```
+
+Without it the install still succeeds and the client still works; only the
+dylib is missing, and `npx imcore-bridge build-native` produces it.
 
 The dylib is compiled at install time rather than shipped. A prebuilt binary
 that gets injected into Messages.app is not something to accept from a

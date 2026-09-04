@@ -2,12 +2,13 @@ name: Release
 
 # Changesets flow. Every merged change carries a .changeset entry; this
 # workflow keeps a "Version packages" pull request open that bumps
-# package.json and CHANGELOG.md. Merging that pull request tags the release
-# and publishes to npm.
+# package.json and CHANGELOG.md. Merging that pull request tags the release,
+# and the tag triggers publish.yml, which attaches the tarball.
 #
-# Publishing needs an NPM_TOKEN secret with publish rights on the package. If
-# it is absent the version pull request still works and only the publish step
-# is skipped, so the repository is useful before anyone sets it up.
+# The package is distributed as a GitHub Release asset rather than through
+# npm. The tarball is exactly what `npm pack` produces, so `bun add <url>` and
+# `npm install <url>` both work, and nobody needs a registry account or a
+# token for either publishing or installing.
 on:
   push:
     branches: [main]
@@ -15,7 +16,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  id-token: write
 
 concurrency: release-${{ github.ref }}
 
@@ -30,9 +30,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
       - run: npm ci
-      - name: Version pull request, or tag and publish the release
+      - name: Version pull request, or tag the release
         uses: changesets/action@v2
         with:
           version-script: npm run version
@@ -41,4 +40,3 @@ jobs:
           pr-title: "Version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

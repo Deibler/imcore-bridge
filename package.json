@@ -50,7 +50,7 @@
     "clean": "rm -rf dist native/build",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "npm run build && changeset publish"
+    "release": "npm run build && changeset tag && git push --follow-tags"
   },
   "keywords": [
     "macos",
