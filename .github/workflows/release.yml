@@ -56,9 +56,20 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          version=$(node -p "require('./package.json').version")
+          # Read the version from the COMMIT, not the working tree. The
+          # changesets step above runs the version script in place to build its
+          # pull request, so package.json on disk is already the NEXT version
+          # while HEAD is still the released one. Reading the tree asks for a
+          # tag that does not exist yet and silently attaches nothing.
+          git show HEAD:package.json > /tmp/released-package.json
+          version=$(node -p "require('/tmp/released-package.json').version")
           tag="v$version"
           tarball="imcore-bridge-$version.tgz"
+          echo "committed version $version"
+
+          # npm pack reads the working tree, which may be ahead. Put the
+          # manifest back so the tarball matches the tag it is attached to.
+          git checkout -- package.json
 
           git fetch --tags --quiet
           if ! git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
@@ -103,3 +114,12 @@ jobs:
 
           gh release create "$tag" "$tarball" --title "$tag" --notes-file release-notes.md \
             || gh release upload "$tag" "$tarball" --clobber
+
+          # Uploading is a claim. This step already reported success once while
+          # attaching nothing, so confirm the asset is on the release.
+          gh release view "$tag" --json assets --jq '[.assets[].name] | join(" ")' \
+            | grep -qw "$tarball" || {
+              echo "upload reported success but $tag carries no $tarball"
+              exit 1
+            }
+          echo "attached $tarball to $tag"
