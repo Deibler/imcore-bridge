@@ -2,8 +2,13 @@ name: Release
 
 # Changesets flow. Every merged change carries a .changeset entry; this
 # workflow keeps a "Version packages" pull request open that bumps
-# package.json and CHANGELOG.md. Merging that pull request tags the release,
-# and the tag triggers publish.yml, which attaches the tarball.
+# package.json and CHANGELOG.md. Merging that pull request tags the release
+# and attaches the tarball in the same job.
+#
+# The attach step is deliberately NOT a separate tag-triggered workflow. A tag
+# pushed with the default token does not start a workflow run, so a tag
+# trigger never fires here and leaves a release with nothing installable
+# behind it. Doing it inline is an API call rather than an event, which works.
 #
 # The package is distributed as a GitHub Release asset rather than through
 # npm. The tarball is exactly what `npm pack` produces, so `bun add <url>` and
@@ -40,3 +45,61 @@ jobs:
           pr-title: "Version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Attach the tarball to the release for whatever version is on main, if
+      # that version is tagged and does not have it yet. Idempotent and safe to
+      # run on every push: it exits immediately when there is nothing to do,
+      # which also lets it repair a release that was created without an asset.
+      - name: Attach the tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          tarball="imcore-bridge-$version.tgz"
+
+          git fetch --tags --quiet
+          if ! git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "no tag $tag; nothing to attach"
+            exit 0
+          fi
+          if gh release view "$tag" --json assets \
+               --jq '[.assets[].name] | join(" ")' 2>/dev/null | grep -qw "$tarball"; then
+            echo "$tag already carries $tarball"
+            exit 0
+          fi
+
+          npm pack
+
+          # A consumer installs the asset, not the checkout. Prove the artifact
+          # about to be attached is the one that works.
+          smoke=$(mktemp -d)
+          cp "$tarball" "$smoke/"
+          (
+            cd "$smoke"
+            npm init -y > /dev/null
+            npm install "./$tarball"
+            node --input-type=module -e '
+              import { ImcoreBridge } from "imcore-bridge";
+              if (typeof ImcoreBridge?.connect !== "function") {
+                throw new Error("packaged entry point does not expose ImcoreBridge");
+              }
+            '
+            ./node_modules/.bin/imcore-bridge --version
+            test -f node_modules/imcore-bridge/native/build/imcore-bridge.dylib
+          )
+
+          {
+            echo "Install without a registry account:"
+            echo
+            echo '```bash'
+            echo "bun add https://github.com/$REPO/releases/download/$tag/$tarball"
+            echo '```'
+            echo
+            echo "See CHANGELOG.md for what changed."
+          } > release-notes.md
+
+          gh release create "$tag" "$tarball" --title "$tag" --notes-file release-notes.md \
+            || gh release upload "$tag" "$tarball" --clobber
