@@ -1,0 +1,77 @@
+name: Publish
+
+# Attaches the packed tarball to the GitHub Release for a version tag. This is
+# the distribution channel: consumers install from the asset URL, so if this
+# does not run there is a tag with nothing installable behind it.
+#
+# `npm pack` runs `prepare`, so the tarball carries a freshly compiled client.
+# The native dylib is deliberately NOT in it: it is compiled on the installing
+# machine by `postinstall`, or later by `imcore-bridge build-native`.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: Pack
+        id: pack
+        run: |
+          tarball=$(npm pack --silent | tail -1)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      # The tag and the manifest must agree. They can drift if a tag is pushed
+      # by hand, and the asset URL embeds the manifest version, so a mismatch
+      # publishes an asset nobody's dependency line will resolve.
+      - name: Refuse a tag that does not match package.json
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          manifest=$(node -p "require('./package.json').version")
+          test "$tagged" = "$manifest" || {
+            echo "tag $GITHUB_REF_NAME does not match package.json $manifest"
+            exit 1
+          }
+
+      # A consumer installs the asset, not the checkout. Prove the artifact
+      # about to be attached is the one that works.
+      - name: Verify the tarball installs and runs
+        run: |
+          smoke=$(mktemp -d)
+          cp "${{ steps.pack.outputs.tarball }}" "$smoke/"
+          cd "$smoke"
+          npm init -y > /dev/null
+          npm install ./imcore-bridge-*.tgz
+          node --input-type=module -e '
+            import { ImcoreBridge } from "imcore-bridge";
+            if (typeof ImcoreBridge?.connect !== "function") {
+              throw new Error("packaged entry point does not expose ImcoreBridge");
+            }
+          '
+          ./node_modules/.bin/imcore-bridge --version
+          test -f node_modules/imcore-bridge/native/build/imcore-bridge.dylib
+
+      - name: Attach the tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.tarball }}" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Install without a registry account:
+
+\`\`\`bash
+bun add https://github.com/${{ github.repository }}/releases/download/$GITHUB_REF_NAME/${{ steps.pack.outputs.tarball }}
+\`\`\`
+
+See the changelog for what changed." \
+            || gh release upload "$GITHUB_REF_NAME" "${{ steps.pack.outputs.tarball }}" --clobber
