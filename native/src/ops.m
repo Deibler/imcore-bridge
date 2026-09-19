@@ -1396,6 +1396,42 @@ BOOL IMBRetract(id chat, id chatItem, NSString **errCode, NSString **errMessage)
     }
 }
 
+/// The compatibility text in the class the daemon will decode.
+///
+/// An edit leaves the app as a one-way XPC message to imagent, which checks
+/// each argument against the class declared for it in
+/// `IMDaemonChatSendMessageProtocol` before the call is dispatched. macOS 26
+/// declares `backwardCompatabilityText:` as NSAttributedString. Handing
+/// `editMessageItem:` an NSString there is not refused in the app: the daemon
+/// throws while decoding, drops the message, and nothing comes back, so the
+/// edit reported success and never left the Mac. The declaration is read
+/// rather than the version assumed, so a build that declares NSString again
+/// gets one.
+static id compatibilityText(NSString *text) {
+    static BOOL wantsPlainString = NO;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        const char *(*encodingOf)(Protocol *, SEL, BOOL, BOOL) =
+            dlsym(RTLD_DEFAULT, "_protocol_getMethodTypeEncoding");
+        Protocol *proto = NSProtocolFromString(@"IMDaemonChatSendMessageProtocol");
+        SEL sel = NSSelectorFromString(
+            @"sendEditedMessage:previousMessage:partIndex:editType:toChatIdentifier:style:account:"
+             "backwardCompatabilityText:");
+        const char *encoding = (encodingOf && proto) ? encodingOf(proto, sel, YES, YES) : NULL;
+        if (!encoding) return;
+        // The extended encoding annotates each object argument with its class,
+        // `@"NSString"`; the compatibility text is the last argument.
+        const char *cursor = encoding, *lastClass = NULL;
+        while ((cursor = strstr(cursor, "@\"")) != NULL) { lastClass = cursor + 2; cursor += 2; }
+        if (!lastClass) return;
+        const char *end = strchr(lastClass, '"');
+        if (!end) return;
+        wantsPlainString = (size_t)(end - lastClass) == strlen("NSString")
+            && strncmp(lastClass, "NSString", end - lastClass) == 0;
+    });
+    return wantsPlainString ? (id)text : (id)attributed(text);
+}
+
 BOOL IMBEdit(id chat, id chatItem, long long partIndex, NSString *newText,
              NSString **errCode, NSString **errMessage) {
     SEL sel = NSSelectorFromString(
@@ -1408,12 +1444,15 @@ BOOL IMBEdit(id chat, id chatItem, long long partIndex, NSString *newText,
 
     // The edit API operates on the storage item, not the display item. The
     // translation argument is not an attributed string — passing one makes
-    // IMCore ask it for a dictionaryRepresentation and throw.
+    // IMCore ask it for a dictionaryRepresentation and throw. The
+    // compatibility text is whatever the daemon declares, see above; the
+    // return here only means the app accepted the call, so callers confirm the
+    // edit in the store before trusting it.
     id item = safeValue(chatItem, @"_item") ?: chatItem;
     NSAttributedString *body = attributed(newText);
     @try {
         ((void (*)(id, SEL, id, long long, id, id, id))objc_msgSend)(
-            chat, sel, item, partIndex, body, nil, newText);
+            chat, sel, item, partIndex, body, nil, compatibilityText(newText));
         return YES;
     } @catch (NSException *e) {
         IMBLog(@"editMessageItem threw: %@", e.reason);

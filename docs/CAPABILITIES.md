@@ -117,7 +117,7 @@ device permanently.
 | Choose the service | partial | `sendMessage:onAccount:` with `activeSMSAccount` / `activeIMessageAccount`, routing one message without touching the conversation's own account. The refusals are verified — an unknown name and a machine with no relay are both rejected before anything is sent. Forcing SMS **cannot be verified here**: this Mac reports `smsRelayCapable: false`, so there is no SMS account to send on. |
 | Subject line | done | same factory |
 | Expressive effect | done | `…messageSubject:flags:expressiveSendStyleID:threadIdentifier:`; confirmed as `expressive_send_style_id` in the store |
-| Edit a sent message | done | `editMessageItem:atPartIndex:…`; confirmed via `date_edited` |
+| Edit a sent message | done | `editMessageItem:atPartIndex:…`, with `backwardCompatabilityText:` in the class imagent declares for it (`NSAttributedString` on macOS 26, read from `IMDaemonChatSendMessageProtocol` at first use). An NSString there is dropped by the daemon while decoding, with nothing reported back, so the app-side call succeeding is not the edit succeeding; confirmed via `date_edited` |
 | Mark chat as read | done | `markAllMessagesAsRead` |
 | Group rename | done | `setDisplayName:`; verified live and in the store, and the resulting event decodes on both paths |
 | Group add | untested | `_addParticipants:withState:`. Never run — testing it means adding a real person to a real conversation. It is now asked about first, so a conversation that will not take the participants refuses instead of reporting success. |
